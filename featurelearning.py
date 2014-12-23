@@ -12,29 +12,40 @@ dictionaries, as given in:
   publisher={Springer}
 }
 
+Code is constructed to minimise memory use, may not always be optimal.
 """
 from __future__ import division, print_function
+from builtins import range
 import numpy as np
 from sklearn.base import BaseEstimator
 
 
-def simple_cov(x):
+def simple_cov(X):
     """Computes the covariance matrix of the data in X.
 
-    Avoids the temporary array created when using numpy.cov, and exploits the
-    fact that the data here is already centered around zero.
+    Avoids the temporary array created when using numpy.cov.
 
     Assumes data is real, and each observation is centered around zero.
 
     Also, deals with data arranged as rows of independant observations, unlike
-    numpy.cov
+    numpy.cov defaults.
+
+    Will be significantly slower than np.cov(). Necessary to avoid temporary 
+    matrices when dealing with arrays near the size of ram.
+
+    Not recommended unless input values are bounded and near the sample average 
+    . Adds and subtracts this in place and possible numerical issues.
     """
-    rows = x.shape[0]
-    output = np.dot(x.T, x)
-    return output/(rows - 1) # 'Unbiased' estimate of covariance.
+    examples, features = X.shape
+    output = np.empty((features, features), dtype='float')
+    sample_mean = X.mean(axis=0, keepdims=True)
+    X -= sample_mean # Operates in place on original data
+    output = np.dot(X.T, X)
+    X += sample_mean # Restore the sample mean
+    return output/(examples - 1) # 'Unbiased' estimate of covariance.
 
 
-def normalise_inplace(data, variance_reg=0, brightness=True, avoid_copy=False):
+def normalise_inplace(X, variance_reg=0, brightness=True, avoid_copy=False):
     """Normalise the rows of an array in place to have zero mean and unit length.
 
     avoid_copy: operate row by row instead of using vectorised numpy expression.
@@ -49,14 +60,14 @@ def normalise_inplace(data, variance_reg=0, brightness=True, avoid_copy=False):
     """
 
     if avoid_copy:
-        for row in data:
+        for row in X:
             if brightness:
                 row -= np.mean(row)
-            row /= np.sqrt(np.var(row, axis=1) + variance_reg)
+            row /= np.sqrt(np.var(row) + variance_reg)
     else:
         if brightness:
-            data -= np.mean(data, axis=1)
-        data /= np.sqrt(np.var(data, axis=1) + variance_reg)
+            X -= np.mean(X, axis=1)[:, None]
+        X /= np.sqrt(np.var(X, axis=1) + variance_reg)[:, None]
 
 
 class Whiten(BaseEstimator):
@@ -64,7 +75,8 @@ class Whiten(BaseEstimator):
     to zero mean at least zero mean"""
     def __init__(self, energy=0.95, whiten_reg=0.1, k=None):
         """
-        energy:
+        energy: Since rows are assumed zero centered, low energy eigenvalues are
+            expected, so energy should be less than 1.0
         whiten_reg:
         k: Number of eigenvectors to retain in the transform. If specified, the
         energy term is ignored."""
@@ -82,15 +94,24 @@ class Whiten(BaseEstimator):
         sort_order = D.argsort()[::-1]
         D = D[sort_order]
         V = V[:, sort_order]
+        self.D = D
+        self.V = V
 
-        # Discard low energy terms
+       
+        if self.energy >= 1 or self.energy is None:
+            k = X.shape[1]
         if self.k is not None:
             k = self.k
         else:
-            k = np.argmax((D.cumsum()/D.sum()) > self.energy)
-
+            # argmax selects the first example when maximum is repeated
+            k = np.argmax((D.cumsum()/D.sum()) >= self.energy) + 1
+        
+        # Discard low energy terms
         D = D[:k]
         V = V[:,:k]
+
+        self.k = k
+
         self.whiten = (V.dot(np.diag((D + self.whiten_reg)**(-0.5)))).dot(V.T).T
 
     def transform(self, X, y=None, inplace=False):
@@ -98,12 +119,10 @@ class Whiten(BaseEstimator):
         inplace: Update the rows in place, one at a time. Slower, but avoids
             making a temporary copy of a large array. """
         if inplace:
-            for row in X:
-                whitened = row.dot(self.whiten)
-                row = whitened
+            for i in range(X.shape[0]):
+                X[i,:] = X[i,:].dot(self.whiten)
         else:
-            X = np.dot(X, self.whiten)
-            return X
+            return np.dot(X, self.whiten)
 
 
 class SphericalKMeans(BaseEstimator):
