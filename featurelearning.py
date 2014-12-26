@@ -45,7 +45,7 @@ def simple_cov(X):
     return output/(examples - 1) # 'Unbiased' estimate of covariance.
 
 
-def normalise_inplace(X, variance_reg=0, brightness=True, avoid_copy=False):
+def normalise_inplace(X, norm_reg=0, brightness=True, avoid_copy=False):
     """Normalise the rows of an array in place to have zero mean and unit length.
 
     avoid_copy: operate row by row instead of using vectorised numpy expression.
@@ -63,11 +63,11 @@ def normalise_inplace(X, variance_reg=0, brightness=True, avoid_copy=False):
         for row in X:
             if brightness:
                 row -= np.mean(row)
-            row /= np.sqrt(np.var(row) + variance_reg)
+            row /= np.linalg.norm(row) + norm_reg
     else:
         if brightness:
             X -= np.mean(X, axis=1)[:, None]
-        X /= np.sqrt(np.var(X, axis=1) + variance_reg)[:, None]
+        X /= (np.linalg.norm(X, axis=1) + norm_reg)[:, None]
 
 
 class Whiten(BaseEstimator):
@@ -125,36 +125,70 @@ class Whiten(BaseEstimator):
             return np.dot(X, self.whiten)
 
 
+def _iterate_spherical(X, centroids, sort_mag=False):
+    """Performs a single step of spherical kmeans."""
+    similarities = np.dot(X, centroids.T)
+    cluster_assignments = np.argmax(similarities, axis=1)
+    new_centroids = np.zeros_like(centroids)
+
+    for i in range(centroids.shape[0]):
+        this_cluster = cluster_assignments == i
+        if np.sum(this_cluster) == 0: # Reassign zombie cluster
+            new_centroids[i,:] = _init_random_selection(X, 1)
+        else:
+            new_centroids[i,:] = np.sum(X[cluster_assignments==i, :])
+
+    magnitude = np.linalg.norm(new_centroids, axis=1)
+    new_centroids /= magnitude[:, None]
+    if sort_mag:
+        new_centroids = new_centroids[magnitude.argsort()]
+    return new_centroids
+
+
+def _init_random_selection(X, n_clusters):
+    """Choose randomly from input patches as initial centroids."""
+    indices = np.random.randint(X.shape[0], size=n_clusters)
+    centroids = X[indices, :].copy()
+    return centroids
+
+def _spherical_kmeans(X, n_clusters, iterations):
+    centroids = _init_random_selection(X, self.n_clusters)
+    for i in range(iterations):
+        centroids = _iterate_spherical(X, centroids, sort_mag=True)
+    return iterations
+
+def _hier_kmeans(X, n_clusters, iterations, levels):
+    centroids = _spherical_kmeans(X, n_clusters, iterations)
+    if levels == 1:
+        return centroids
+    else:
+        cluster_assignments = np.dot(X, centroids.T).argmax(axis=1)
+        selections = (cluster_assignments == i for i in range(n_clusters))
+        lower_levels = [_hier_kmeans(X[select], n_clusters, iterations, levels-1) 
+                        for select in selections]
+        return [centroids, lower_levels]
+
+def _hier_encode(X, centroids, levels):
+    if levels == 1:
+        output = np.dot(X, centroids.T).argmax(axis=1)
+    else:
+        output = np.zeros((X.shape[0], levels), dtype='int')
+        output[:, 0] = np.dot(X, centroids.T).argmax(axis=1)
+        for i in range(centroids[0].shape[0]):
+            this_cluster = output[:, 0] == i
+            output[this_cluster, 1] = _hier_encode(X[this_cluster, :], centroids[i+1], levels-1)
+    return output
+
+
 class SphericalKMeans(BaseEstimator):
     """Assumes normalised input (zero mean and unit variance or magnitude)"""
-    def __init__(self, n_clusters=10, max_iter=10):
+    def __init__(self, n_clusters=10, iterations=10):
         self.n_clusters = n_clusters
-        self.max_iter = max_iter
+        self.iterations = iterations
 
     def fit(self, X, y=None):
         """ """
-        # Initialise with randomly selected examples
-        indices = np.random.randint(X.shape[0], size=self.n_clusters)
-        centroids = X[indices, :]
-
-        centroid_update = np.zeros(centroids.shape)
-
-        for i in range(self.max_iter):
-            proj = np.dot(X, centroids.T)
-            proj_max_loc = proj.argmax(axis=1)
-            proj_max = proj.max(axis=1)
-            del proj
-            # This is the weighted update given in Coates + Ng (2012)
-            s = np.zeros((self.n_clusters, X.shape[0]))
-            s[proj_max_loc, np.arange(X.shape[0])] = proj_max
-
-            np.dot(s, X, out=centroid_update)
-            del s
-            centroids += centroid_update
-            mag = np.sqrt((centroids**2).sum(axis=1))
-            centroids /= mag[:, None]
-
-        self.centroids = centroids[mag.argsort()]
+        self.centroids = _spherical_kmeans(X, self.n_clusters, self.iterations)
 
     def transform(self, X, y=None):
         """ """
@@ -164,6 +198,27 @@ class SphericalKMeans(BaseEstimator):
         """ """
         similarities = np.dot(X, self.centroids.T)
         return similarities.argmax(axis=1)
+
+
+class HierSKMeans(BaseEstimator):
+    def __init__(self, n_clusters=10, iterations=10, levels=2):
+        self.n_clusters = n_clusters
+        self.iterations = iterations
+        self.levels = levels
+
+    def fit(self, X, y=None):
+        """ """
+        self.centroids = _hier_kmeans(X, self.n_clusters, self.iterations, self.levels)
+
+    def transform(self, X, y=None):
+        encoding_tree = _hier_encode(X, self.centroids, levels=self.levels)
+        return encoding_tree
+
+    def predict(self, X, y=None):
+        encoding_tree = _hier_encode(X, self.centroids, levels=self.levels)
+        for i in range(1, levels):
+            encoding_tree[:, -(i+1)] *= self.n_clusters**i  
+        return np.sum(encoding_tree, axis=1)
 
 
 
