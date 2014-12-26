@@ -12,7 +12,7 @@ from sklearn.base import BaseEstimator
 
 
 def collect_normalised_patches(images, n_images, pixels=7,
-                               n_patches=100, variance_reg=1):
+                               n_patches=100, norm_reg=1):
     """Collect fixed number of patches from random locations in each image.
 
     Parameters:
@@ -33,7 +33,7 @@ def collect_normalised_patches(images, n_images, pixels=7,
 
     """
     # Preallocate output array for memory efficiency
-    patches = np.zeros((n_images*max_patches,patch_size**2), dtype='float')
+    patches = np.empty((n_images*max_patches,patch_size**2), dtype='float')
     patch_index = 0
     for image in images:
         these_patches = extract_patches_2d(image,
@@ -41,7 +41,7 @@ def collect_normalised_patches(images, n_images, pixels=7,
                                            patches=n_patches)
         these_patches = these_patches.reshape((n_patches, pixels**2))
         normalise_inplace(these_patches, 
-                          variance_reg=variance_reg, 
+                          norm_reg=norm_reg, 
                           brightness=True)
         patches[patch_index:patch_index + n_patches] = these_patches
     return patches
@@ -50,14 +50,14 @@ def collect_normalised_patches(images, n_images, pixels=7,
 class BagOfFeaturesEncoder(BaseEstimator):
     """ """
     def __init__(self, pixels=7, n_words=10, n_patches=10, energy=0.95,
-                 whiten_reg=0.1, variance_reg=1, max_iter=10):
+                 whiten_reg=0.1, norm_reg=1, max_iter=10):
         self.pixels = pixels
         self.n_words = n_words
         self.n_patches = n_patches
         self.energy = energy
         self.whiten_reg = whiten_reg
         self.max_iter = max_iter
-        self.variance_reg = variance_reg
+        self.norm_reg = norm_reg
         self.whiten = Whiten(energy=self.energy, whiten_reg=self.whiten_reg)
         self.cluster = SphericalKMeans(n_clusters=n_words, max=self.max_iter)
 
@@ -66,7 +66,7 @@ class BagOfFeaturesEncoder(BaseEstimator):
         images: an iterable of images as 2d arrays """
         # Extract patches from images
         patches = collect_normalised_patches(images, n_images=n_images,
-                                             variance_reg=self.variance_reg)
+                                             norm_reg=self.norm_reg)
         self.whiten.fit(patches)
         self.whiten.transform(patches, inplace=True)
         self.cluster.fit(patches)
