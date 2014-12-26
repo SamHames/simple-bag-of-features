@@ -12,8 +12,10 @@ dictionaries, as given in:
   publisher={Springer}
 }
 
-Code is constructed to minimise memory use, may not always be optimal.
+Code is constructed to minimise memory use, may not always be optimal for small
+datasets.
 """
+
 from __future__ import division, print_function
 from builtins import range
 import numpy as np
@@ -152,10 +154,10 @@ def _init_random_selection(X, n_clusters):
     return centroids
 
 def _spherical_kmeans(X, n_clusters, iterations):
-    centroids = _init_random_selection(X, self.n_clusters)
+    centroids = _init_random_selection(X, n_clusters)
     for i in range(iterations):
         centroids = _iterate_spherical(X, centroids, sort_mag=True)
-    return iterations
+    return centroids
 
 def _hier_kmeans(X, n_clusters, iterations, levels):
     centroids = _spherical_kmeans(X, n_clusters, iterations)
@@ -166,17 +168,19 @@ def _hier_kmeans(X, n_clusters, iterations, levels):
         selections = (cluster_assignments == i for i in range(n_clusters))
         lower_levels = [_hier_kmeans(X[select], n_clusters, iterations, levels-1) 
                         for select in selections]
-        return [centroids, lower_levels]
+        return [centroids] + lower_levels
 
 def _hier_encode(X, centroids, levels):
     if levels == 1:
-        output = np.dot(X, centroids.T).argmax(axis=1)
+        output = np.dot(X, centroids.T).argmax(axis=1)[:, None]
     else:
         output = np.zeros((X.shape[0], levels), dtype='int')
-        output[:, 0] = np.dot(X, centroids.T).argmax(axis=1)
+        output[:, 0] = np.dot(X, centroids[0].T).argmax(axis=1)
         for i in range(centroids[0].shape[0]):
             this_cluster = output[:, 0] == i
-            output[this_cluster, 1] = _hier_encode(X[this_cluster, :], centroids[i+1], levels-1)
+            output[this_cluster, 1:] = _hier_encode(X[this_cluster, :], 
+                                                    centroids[i+1], 
+                                                    levels-1)
     return output
 
 
@@ -216,7 +220,7 @@ class HierSKMeans(BaseEstimator):
 
     def predict(self, X, y=None):
         encoding_tree = _hier_encode(X, self.centroids, levels=self.levels)
-        for i in range(1, levels):
+        for i in range(1, self.levels):
             encoding_tree[:, -(i+1)] *= self.n_clusters**i  
         return np.sum(encoding_tree, axis=1)
 

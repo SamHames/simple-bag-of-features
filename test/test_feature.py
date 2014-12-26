@@ -1,5 +1,6 @@
 import numpy as np
-from BOF.featurelearning import normalise_inplace, simple_cov, Whiten
+from BOF.featurelearning import normalise_inplace, simple_cov
+from BOF import Whiten, SphericalKMeans, HierSKMeans
 
 np.random.seed(42)
 
@@ -11,16 +12,16 @@ class testNormalise():
     def test_default(self):
         normalise_inplace(self.x1)
         assert np.allclose(self.x1.mean(axis=1), 0)
-        assert np.allclose(self.x1.var(axis=1), 1)
+        assert np.allclose(np.linalg.norm(self.x1, axis=1), 1)
 
     def test_regularisation(self):
         normalise_inplace(self.x1)
-        normalise_inplace(self.x2, variance_reg=1)
+        normalise_inplace(self.x2, norm_reg=1)
         assert (self.x1.var(axis=1) > self.x2.var(axis=1)).all()
 
     def test_brightness(self):
         normalise_inplace(self.x1, brightness=False)
-        assert np.allclose(self.x1.var(axis=1), 1)
+        assert np.allclose(np.linalg.norm(self.x1, axis=1), 1)
         assert (self.x2.mean(axis=1) > 0).all()
 
     def test_avoid_copy(self):
@@ -29,7 +30,7 @@ class testNormalise():
         assert (self.x1 == self.x2).all()
 
 
-class test_simplecov():
+class testSimplecov():
     def setUp(self):
         self.x1 = np.arange(100).reshape((20,5)).astype('float')**2
         # Square to avoid correlated variables after normalisation
@@ -44,7 +45,8 @@ class test_simplecov():
         cov = simple_cov(self.x1)
         assert cov.shape == (5, 5)
 
-def energy_concentration(X):
+
+def energy_concentrated(X):
     """ Test if whitening has concentrated variance on the diagonal. """
     variances = np.abs(np.diag(X)).sum()
     upper_tri = np.abs(np.triu(X, k=1)).sum()
@@ -52,7 +54,7 @@ def energy_concentration(X):
 
 
 
-class test_Whiten():
+class testWhiten():
     def setUp(self):
         eigenvectors = np.random.rand(5,5)
         weights = np.random.rand(10,5)**2
@@ -63,27 +65,82 @@ class test_Whiten():
         self.cov_full = np.cov(y.T)
 
     def test_eigen(self):
-        assert energy_concentration(self.cov_full)
+        assert energy_concentrated(self.cov_full)
         assert np.allclose(np.diag(self.cov_full), 1)
 
     def test_energy(self):
-        whiten_partial = Whiten(energy=0.9, whiten_reg=0)
+        whiten_partial = Whiten(energy=0.5, whiten_reg=0)
         whiten_partial.fit(self.x1)
         cov_partial = np.cov(whiten_partial.transform(self.x1).T)
-        assert energy_concentration(cov_partial)
+        assert energy_concentrated(cov_partial)
         assert (np.diag(self.cov_full) > np.diag(cov_partial)).all()
 
     def test_regularisation(self):
         whiten_reg = Whiten(energy=1.0, whiten_reg=0.1)
         whiten_reg.fit(self.x1)
         cov_reg = np.cov(whiten_reg.transform(self.x1).T)
-        assert energy_concentration(cov_reg)
+        assert energy_concentrated(cov_reg)
         assert (np.diag(self.cov_full) > np.diag(cov_reg)).all()
 
     def test_inplace(self):
         self.whiten.transform(self.x1, inplace=True)
         cov_inplace = np.cov(self.x1.T)
         assert np.allclose(cov_inplace, self.cov_full).all()
+
+
+class testSphericalKMeans():
+    def setUp(self):
+        self.X = np.random.rand(100, 10)
+        self.X1 = np.random.rand(100, 10)
+        normalise_inplace(self.X)
+        normalise_inplace(self.X1)
+        self.skmeans = SphericalKMeans()
+        self.skmeans.fit(self.X)
+
+    def test_centroids(self):
+        assert self.skmeans.centroids.shape == (10, 10)
+        assert np.allclose(np.linalg.norm(self.skmeans.centroids, axis=1), 1)
+
+    def test_transform(self):
+        tform = self.skmeans.transform(self.X1)
+        assert tform.shape == (100,10)
+        assert tform.max() <= 1.0 and tform.min() >= -1.0
+
+    def test_predict(self):
+        predict = self.skmeans.predict(self.X1)
+        assert predict.shape == (100,)
+        assert np.issubdtype(predict.dtype, np.integer)
+        assert predict.max() <= 9 and predict.min() >= 0
+
+class testHierSKMeans():
+    def setUp(self):
+        self.X = np.random.rand(100, 5)
+        self.X1 = np.random.rand(100, 5)
+        normalise_inplace(self.X)
+        normalise_inplace(self.X1)
+
+        self.hkmeans = HierSKMeans(n_clusters=2, levels=3)
+        self.hkmeans.fit(self.X)
+
+    def test_centroids(self):
+        assert self.hkmeans.centroids[0].shape == (2, 5)
+        for i in range(1, self.hkmeans.levels):
+            this_layer = self.hkmeans.centroids[i]
+            assert len(this_layer) == 3
+            assert len(this_layer[1]) == 2
+
+    def test_transform(self):
+        tform = self.hkmeans.transform(self.X1)
+        assert tform.shape == (100, self.hkmeans.levels)
+        assert np.issubdtype(tform.dtype, np.integer)
+        assert tform.max() <= 1 and tform.min() >= 0
+
+    def test_predict(self):
+        predict = self.hkmeans.predict(self.X1)
+        assert predict.shape == (100,)
+        assert np.issubdtype(predict.dtype, np.integer)
+        assert predict.max() <= 7 and predict.min() >= 0
+
 
 
 
