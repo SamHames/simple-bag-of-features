@@ -73,8 +73,7 @@ def normalise_inplace(X, norm_reg=0, brightness=True, avoid_copy=False):
 
 
 class Whiten(BaseEstimator):
-    """ Whitens the given data. Assumes input patches are already normalised
-    to zero mean at least zero mean"""
+    """ Whitens the given data using ZCA transform"""
     def __init__(self, energy=0.95, whiten_reg=0.1, k=None):
         """
         energy: Since rows are assumed zero centered, low energy eigenvalues are
@@ -132,32 +131,37 @@ def _iterate_spherical(X, centroids, sort_mag=False):
     similarities = np.dot(X, centroids.T)
     cluster_assignments = np.argmax(similarities, axis=1)
     new_centroids = np.zeros_like(centroids)
-
+    
     for i in range(centroids.shape[0]):
         this_cluster = cluster_assignments == i
         if np.sum(this_cluster) == 0: # Reassign zombie cluster
-            new_centroids[i,:] = _init_random_selection(X, 1)
+            new_centroids[i,:] = _init_random_selection(X)
         else:
-            new_centroids[i,:] = np.sum(X[cluster_assignments==i, :])
+            new_centroids[i,:] = np.sum(X[this_cluster, :], axis=0)
 
     magnitude = np.linalg.norm(new_centroids, axis=1)
+    magnitude[magnitude==0] = 1
     new_centroids /= magnitude[:, None]
+
     if sort_mag:
         new_centroids = new_centroids[magnitude.argsort()]
+
     return new_centroids
 
 
-def _init_random_selection(X, n_clusters):
+def _init_random_selection(X, n_clusters=None):
     """Choose randomly from input patches as initial centroids."""
     indices = np.random.randint(X.shape[0], size=n_clusters)
     centroids = X[indices, :].copy()
     return centroids
 
+
 def _spherical_kmeans(X, n_clusters, iterations):
-    centroids = _init_random_selection(X, n_clusters)
+    centroids = _init_random_selection(X, n_clusters=n_clusters)
     for i in range(iterations):
         centroids = _iterate_spherical(X, centroids, sort_mag=True)
     return centroids
+
 
 def _hier_kmeans(X, n_clusters, iterations, levels):
     centroids = _spherical_kmeans(X, n_clusters, iterations)
@@ -169,6 +173,7 @@ def _hier_kmeans(X, n_clusters, iterations, levels):
         lower_levels = [_hier_kmeans(X[select], n_clusters, iterations, levels-1) 
                         for select in selections]
         return [centroids] + lower_levels
+
 
 def _hier_encode(X, centroids, levels):
     if levels == 1:
