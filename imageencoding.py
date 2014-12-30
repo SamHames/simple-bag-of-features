@@ -79,6 +79,7 @@ class BagOfFeaturesEncoder(BaseEstimator):
 
         # Extract patches from images
         patches = collect_normalised_patches(images, n_images=n_images,
+                                             pixels=self.pixels,
                                              norm_reg=self.norm_reg,
                                              n_patches=self.n_patches)
         self.whiten.fit(patches)
@@ -105,7 +106,7 @@ class BagOfFeaturesEncoder(BaseEstimator):
             [histogram, bins] = np.histogram(codes,
                                              bins=self.n_words**self.levels,
                                              range=(0, self.n_words**self.levels))
-            histograms.append(histogram.astype('float')/histogram.sum())
+            histograms.append(histogram)
         return np.vstack(histograms)
 
     def transform(self, images, y=None, reshape=True):
