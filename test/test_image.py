@@ -57,6 +57,7 @@ class testBOF():
     def test_predict_pixels(self):
         prediction = self.bof.predict_pixels(self.test_images[0])
         assert prediction.shape == (44, 44, 10)
+        assert (prediction.sum(axis=2) == 1).all()
     # Still need to test the augmented representation and pooling outputs.
 
 

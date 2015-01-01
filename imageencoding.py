@@ -93,7 +93,6 @@ def make_histogram(encoding, words):
     return np.histogram(encoding, bins=words, range=(0, words))[0]
 
 
-
 class BagOfFeaturesEncoder(BaseEstimator):
     """ """
     def __init__(self, pixels=7, n_words=10, n_patches=10, energy=0.95,
@@ -164,7 +163,6 @@ class BagOfFeaturesEncoder(BaseEstimator):
         total_words = self.n_words**self.levels
         augmented = self.augment_(image)
         encoded = [self.transform(im, reshape=True) for im in augmented]
-        print(self.augment_.inverse_transform(encoded))
         encoded = sum(self.augment_.inverse_transform(encoded))
         return encoded
 
