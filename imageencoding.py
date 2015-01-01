@@ -50,11 +50,55 @@ def collect_normalised_patches(images, n_images, pixels=7,
     return patches
 
 
+class Augment():
+
+    def __init__(self, approach='rotate'):
+        self.approach = approach
+
+    def transform(self, image):
+        """Create copies of original image with different rotations"""
+        if self.approach == 'rotate':
+            return [np.rot90(image, k=i) for i in range(0,4)]
+        elif self.approach == 'reflect':
+            return [image, np.fliplr(image), np.flipud(image)]
+        elif self.approach == 'both':
+            images = [np.rot90(image, k=i) for i in range(0,4)]
+            images_left = [np.fliplr(im) for im in images]
+            images_up = [np.flipud(im) for im in images]
+            return images + images_left + images_up
+        else:
+            return [image]
+
+    def inverse_transform(self, images):
+        """Apply the appropriate inverse transforms"""
+        if self.approach == 'rotate':
+            return [np.rot90(images[i], k=-i) for i in range(0,4)]
+        elif self.approach == 'reflect':
+            return [images[0], np.fliplr(image[1]), np.flipud(image[2])]
+        elif self.approach == 'both':
+            base = [np.rot90(images[i], k=-i) for i in range(0,4)]
+            left = [np.fliplr(im) for im in images[4:8]]
+            left = [np.rot90(left[i], k=-i) for i in range(0,4)]
+            up = [np.flipud(im) for im in images[8:]]
+            up = [np.rot90(up[i], k=-i) for i in range(0,4)]
+            return base + left + up
+        else:
+            return images
+
+    def __call__(self, image):
+        return self.transform(image)
+
+
+def make_histogram(encoding, words):
+    return np.histogram(encoding, bins=words, range=(0, words))[0]
+
+
+
 class BagOfFeaturesEncoder(BaseEstimator):
     """ """
     def __init__(self, pixels=7, n_words=10, n_patches=10, energy=0.95,
                  whiten_reg=0.1, norm_reg=0.01, iterations=10, levels=1,
-                 verbose=False):
+                 verbose=False, augment=None):
         self.pixels = pixels
         self.n_words = n_words
         self.n_patches = n_patches
@@ -64,10 +108,12 @@ class BagOfFeaturesEncoder(BaseEstimator):
         self.norm_reg = norm_reg
         self.levels = levels
         self.verbose = verbose
+        self.augment = augment
 
     def fit(self, images, n_images=None, y=None): # Add option to incorporate prebuilt whiten etc operators.
         """
         images: an iterable of images as 2d arrays """
+        self.augment_ = Augment(self.augment)
         self.whiten = Whiten(energy=self.energy, whiten_reg=self.whiten_reg)
         if self.levels > 1:
             self.cluster = HierSKMeans(n_clusters=self.n_words,
@@ -93,57 +139,55 @@ class BagOfFeaturesEncoder(BaseEstimator):
         normalise_inplace(patches, self.whiten_reg)
         return self.whiten.transform(patches)
 
-    def predict(self, images, y=None):
-        """Compute the histogram of visual word counts, using one hot encoding."""
+    def predict(self, images, y=None, pool=False):
+        """Compute the histogram of visual word counts."""
         histograms = []
         i = 0
+        total_words = self.n_words**self.levels
         for image in images:
             i += 1
             if self.verbose:
                 print(i)
-            patches = self.preprocess(image)
-            codes = self.cluster.predict(patches)
-            [histogram, bins] = np.histogram(codes,
-                                             bins=self.n_words**self.levels,
-                                             range=(0, self.n_words**self.levels))
-            histograms.append(histogram)
+            augmented = self.augment_(image)
+            encoded = [self.transform(im) for im in augmented]
+            histogram = [make_histogram(code, total_words) for code in encoded]
+            if pool:
+                histograms.append(sum(histogram))
+            else:
+                histograms.extend(histogram)
         return np.vstack(histograms)
 
-    def transform(self, images, y=None, reshape=True):
-        """Compute the feature similarity for every pixel in the image.
+    def predict_pixels(self, image, y=None):
+        """Compute the augmented one hot encoding for the input image."""
+        predicted = []
+        i = 0
+        total_words = self.n_words**self.levels
+        augmented = self.augment_(image)
+        encoded = [self.transform(im, reshape=True) for im in augmented]
+        print(self.augment_.inverse_transform(encoded))
+        encoded = sum(self.augment_.inverse_transform(encoded))
+        return encoded
+
+    def transform(self, image, y=None, reshape=False):
+        """Transform a single image to per pixel encoding.
 
         reshape: reshape output from 2d array of distances for each patch to a
             3d array of rows x columns x feature responses. """
+        
+        patches = self.preprocess(image)
+        encoded = self.cluster.predict(patches)
 
-        transformed = []
-        for image in images:
-            patches = self.preprocess(image)
-            similarities = self.cluster.transform(patches)
+        # reshape to original image size, minus pixels lost at the boundary
+        if reshape:
+            rows, cols = np.array(image.shape[:2]) - self.pixels + 1
+            # Create a 1-hot encoding (sparse binary array)
+            output = np.zeros((encoded.shape[0], self.n_words**self.levels), 
+                              dtype='bool')
+            output[np.arange(encoded.shape[0]), encoded] = True
+            encoded = output.reshape((rows, cols, -1))
 
-            # reshape to original image size, minus pixels lost at the boundary
-            if reshape and self.levels == 1: # ignore reshape if using hierarchical.
-                rows, cols = np.array(image.shape[:2]) - self.pixels + 1
-                similarities = similarities.reshape((rows, cols, -1))
+        return encoded
 
-            transformed.append(similarities)
-        return transformed
-
-
-class TriangleEncoder(BaseEstimator):
-    def __init__(self, alpha=0):
-        self.alpha = alpha
-
-    def fit(self):
-        pass
-
-    def transfomr(self, X, pool=True):
-        output = np.asarray(X)
-        output -= self.alpha
-        output[output<0] = 0
-        if pool: # Concatenate the results into vector
-            output = output.sum(axis=0)
-            output /= output.sum()
-        return output
 
 
 

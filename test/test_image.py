@@ -1,8 +1,9 @@
 import numpy as np
 from BOF import BagOfFeaturesEncoder
-from BOF.imageencoding import collect_normalised_patches
+from BOF.imageencoding import collect_normalised_patches, Augment
 
-np.random.seed(100)
+np.random.seed(10)
+
 
 class testPatchExtractor():
     def setUp(self):
@@ -14,6 +15,7 @@ class testPatchExtractor():
         mag = np.linalg.norm(patches, axis=1)
         assert np.logical_and(mag > 0, mag <= 1).all()
 
+
 class testBOF():
     def setUp(self):
         """Generate series of random images for sampling."""
@@ -22,34 +24,63 @@ class testBOF():
         self.bof.fit(self.images, n_images=10)
         self.hier = BagOfFeaturesEncoder(n_patches=10, levels=2)
         self.hier.fit(self.images, n_images=10)
-        self.test_images = (np.random.rand(50, 50) for i in range(2))
+        self.test_images = [np.random.rand(50, 50) for i in range(2)]
 
     def test_centroids(self):
         assert self.bof.cluster.centroids.shape == (10, 49)
         assert np.isfinite(self.bof.cluster.centroids).all()
 
-    def test_transform(self):
-        output = self.bof.transform(self.test_images)
-        assert len(output) == 2
-        assert output[0].shape == (44, 44, 10) # Patches are lost at the boundaries
+    def test_transform_reshape(self):
+        output = self.bof.transform(self.test_images[0], reshape=True)
+        assert output.shape == (44, 44, 10) # Patches are lost at the boundaries
+        assert output.dtype =='bool'
 
     def test_transform_noreshape(self):
-        output = self.bof.transform(self.test_images, reshape=False)
-        assert len(output) == 2
-        assert output[0].shape == (44*44, 10) # Patches are lost at the boundaries
+        output = self.bof.transform(self.test_images[0], reshape=False)
+        assert output.shape == (44*44, ) # Patches are lost at the boundaries
 
     def test_predict(self):
         output = self.bof.predict(self.test_images)
         assert output.shape == (2, 10)
-        assert np.logical_and(output[0] <= 1, output[0] >= -1).all()
+        assert (output.sum(axis=1) == 44*44).all()
 
     def test_hier_predict(self):
         output = self.hier.predict(self.test_images)
         assert output.shape == (2, 100)
-        assert np.logical_and(output[0] <= 100, output[0] >= 0).all()
+        assert (output.sum(axis=1) == 44*44).all()
 
     def test_hier_transform(self):
-        output = self.hier.transform(self.test_images)
-        assert output[0].shape == (44*44, 2)
-        assert np.logical_and(output[0] < 10, output[0] >= 0).all()
+        output = self.hier.transform(self.test_images[0])
+        assert output.shape == (44*44,)
+        assert np.logical_and(output < 100, output >= 0).all()
 
+    def test_predict_pixels(self):
+        prediction = self.bof.predict_pixels(self.test_images[0])
+        assert prediction.shape == (44, 44, 10)
+    # Still need to test the augmented representation and pooling outputs.
+
+
+class testAugment():
+    def setUp(self):
+        self.image = np.random.rand(40,30)
+    
+    def test_rotate(self):
+        augment = Augment('rotate')
+        augmented = augment(self.image)
+        assert len(augmented) == 4
+        assert augmented[0].shape == augmented[2].shape == (40, 30)
+        assert augmented[1].shape == augmented[3].shape == (30, 40)
+        assert (np.rot90(augmented[-1]) == self.image).all
+
+    def test_reflect(self):
+        augment = Augment('reflect')
+        augmented = augment(self.image)
+        assert len(augmented) == 3
+        assert augmented[0].shape == augmented[1].shape == augmented[2].shape == (40, 30)
+        assert (np.flipud(augmented[2]) == self.image).all()
+        assert (np.fliplr(augmented[1]) == self.image).all()
+
+    def test_both(self):
+        augment = Augment('both')
+        augmented = augment(self.image)
+        assert len(augmented) == 12
