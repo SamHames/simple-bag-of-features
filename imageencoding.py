@@ -173,7 +173,7 @@ class BagOfFeaturesEncoder(BaseEstimator):
 
             images : iterable of 2D ndarrays
                 Images to extract patches for learning from.
-                
+
             n_images : int
                 Number of example images provided.
             """
@@ -206,7 +206,18 @@ class BagOfFeaturesEncoder(BaseEstimator):
         return self.whiten.transform(patches)
 
     def predict(self, images, y=None, pool=False):
-        """Compute the histogram of visual word counts, over all input images."""
+        """Compute the histogram of visual word counts, over all input images.
+
+        Parameters:
+            images : iterable of 2D ndarrays
+                Images to determine the histograms visual word counts from.
+
+            pool : bool, default: False
+                If True, sum the encodings for each augmented version of an 
+                image, otherwise treat each augmented version as a separate 
+                example.
+
+        """
         histograms = []
         i = 0
         total_words = self.n_words**self.levels
