@@ -21,9 +21,11 @@ class testBOF():
         """Generate series of random images for sampling."""
         self.images = (np.random.randint(0, high=255, size=(50,50)) for i in range(10))
         self.bof = BagOfFeaturesEncoder(n_patches=100)
-        self.bof.fit(self.images, n_images=10)
+        self.bof.fit(self.images, 10)
         self.hier = BagOfFeaturesEncoder(n_patches=10, levels=2)
-        self.hier.fit(self.images, n_images=10)
+        self.hier.fit(self.images, 10)
+        self.augment = BagOfFeaturesEncoder(n_patches=10, levels=2, augment='rotate')
+        self.augment.fit(self.images, 10)
         self.test_images = [np.random.rand(50, 50) for i in range(2)]
 
     def test_centroids(self):
@@ -58,7 +60,13 @@ class testBOF():
         prediction = self.bof.predict_pixels(self.test_images[0])
         assert prediction.shape == (44, 44, 10)
         assert (prediction.sum(axis=2) == 1).all()
-    # Still need to test the augmented representation and pooling outputs.
+
+    def test_augment(self):
+        histograms = self.augment.predict(self.test_images)
+        histograms_pooled = self.augment.predict(self.test_images, pool=True)
+        assert histograms.shape == (8, 100)
+        assert histograms_pooled.shape == (2,100)
+        assert histograms.sum() == histograms_pooled.sum()
 
 
 class testAugment():
