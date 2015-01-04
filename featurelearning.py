@@ -23,20 +23,18 @@ from sklearn.base import BaseEstimator
 
 
 def simple_cov(X):
-    """Computes the covariance matrix of the data in X.
+    """Returns the covariance matrix of the data in X.
 
-    Avoids the temporary array created when using numpy.cov.
+    Used instead of numpy.cov when it is necessary to avoid copying a large 
+    array. Not recommended for general use, as it operates in place on the input
+    array.
 
-    Assumes data is real, and each observation is centered around zero.
+    Parameters:
+        X : ndarray 
+            The data to find the covariance of. Each row is an observation, each 
+            column is a feature. This is transposed from the numpy convention, 
+            but consistent with scikit learn.
 
-    Also, deals with data arranged as rows of independant observations, unlike
-    numpy.cov defaults.
-
-    Will be significantly slower than np.cov(). Necessary to avoid temporary 
-    matrices when dealing with arrays near the size of ram.
-
-    Not recommended unless input values are bounded and near the sample average 
-    . Adds and subtracts this in place and possible numerical issues.
     """
     examples, features = X.shape
     output = np.empty((features, features), dtype='float')
@@ -48,17 +46,29 @@ def simple_cov(X):
 
 
 def normalise_inplace(X, norm_reg=0, brightness=True, avoid_copy=False):
-    """Normalise the rows of an array in place to have zero mean and unit length.
+    """Normalise the rows of an array inplace to have zero mean and unit length.
 
-    avoid_copy: operate row by row instead of using vectorised numpy expression.
-        Slower, but useful to avoid allocating a very large temporary matrix.
-        When using spherical kmeans it is possible to work with 10's of millions
-        of examples, an unexpected temporary array can easily exhaust available
-        ram.
-
-    Notes
-    -----
     WARNING: Operates in place, will overwrite input data.
+
+    Parameters:
+
+        X : ndarray 
+            Data to normalise in place.
+
+        norm_reg : float, default: 0
+            Amount to regularise the brightness normalisation and avoid 
+            numerical instability.
+
+        brightness : bool, default: True
+            If True normalise the brightness by dividing each row by it's own
+            magnitude.
+
+        avoid_copy : bool, default: False
+            If True, operate row-by-row and avoid making a copy. Slow.
+
+    Returns:
+        None. 
+
     """
 
     if avoid_copy:
@@ -73,20 +83,38 @@ def normalise_inplace(X, norm_reg=0, brightness=True, avoid_copy=False):
 
 
 class Whiten(BaseEstimator):
-    """ Whitens the given data using ZCA transform"""
+    """Whitening transformer that learns a ZCA transform of the provided data.
+
+    Parameters:
+
+        energy : float, default: 0.95
+            Amount of energy to retain in the ZCA transform.
+
+        whiten_reg : float, default: 0.1
+            Amount to regularise the variance normalisation. Needed to avoid
+            numerical instability.
+
+        k : int, default: None
+            Number of axes to retain in the ZCA transform. energy is ignored if 
+            this is specified.
+
+    """
+
     def __init__(self, energy=0.95, whiten_reg=0.1, k=None):
-        """
-        energy: Since rows are assumed zero centered, low energy eigenvalues are
-            expected, so energy should be less than 1.0
-        whiten_reg:
-        k: Number of eigenvectors to retain in the transform. If specified, the
-        energy term is ignored."""
         self.energy = energy
         self.whiten_reg = whiten_reg
         self.k = k
 
     def fit(self, X, y=None):
-        """Learn the whitening transform matrix by PCA."""
+        """Learn the whitening transform for the given data.
+
+        Parameters:
+
+            X : ndarray 
+                Example data to learn the whitening transform. Organised as 1 
+                example per row. 
+
+        """
         covariance = simple_cov(X)
         [D, V] = np.linalg.eigh(covariance)
 
@@ -116,9 +144,17 @@ class Whiten(BaseEstimator):
         self.whiten = (V.dot(np.diag((D + self.whiten_reg)**(-0.5)))).dot(V.T).T
 
     def transform(self, X, y=None, inplace=False):
+        """Return the whitened version of the input data.
+
+        Parameters:
+
+            X : ndarray
+                Data to whiten, organised as one example per colummn
+
+            inplace : bool, default: False
+                If True, operate inplace on X and avoid copying. Returns None.
+
         """
-        inplace: Update the rows in place, one at a time. Slower, but avoids
-            making a temporary copy of a large array. """
         if inplace:
             for i in range(X.shape[0]):
                 X[i,:] = X[i,:].dot(self.whiten)
@@ -127,7 +163,7 @@ class Whiten(BaseEstimator):
 
 
 def _iterate_spherical(X, centroids, sort_mag=False):
-    """Performs a single step of spherical kmeans."""
+    """Performs a single iteration of spherical kmeans."""
     similarities = np.dot(X, centroids.T)
     cluster_assignments = np.argmax(similarities, axis=1)
     new_centroids = np.zeros_like(centroids)
@@ -157,6 +193,7 @@ def _init_random_selection(X, n_clusters=None):
 
 
 def _spherical_kmeans(X, n_clusters, iterations):
+    """Return centroids after multiple iterations of spherical kmeans."""
     centroids = _init_random_selection(X, n_clusters=n_clusters)
     for i in range(iterations):
         centroids = _iterate_spherical(X, centroids, sort_mag=True)
@@ -164,6 +201,7 @@ def _spherical_kmeans(X, n_clusters, iterations):
 
 
 def _hier_kmeans(X, n_clusters, iterations, levels):
+    """Return nested list of centroids corresponding to hierarchical kmeans clustering"""
     centroids = _spherical_kmeans(X, n_clusters, iterations)
     if levels == 1:
         return centroids
@@ -176,6 +214,7 @@ def _hier_kmeans(X, n_clusters, iterations, levels):
 
 
 def _hier_encode(X, centroids, levels):
+    """Return hierarchical encoding of data given a set of centroids"""
     if levels == 1:
         output = np.dot(X, centroids.T).argmax(axis=1)[:, None]
     else:
@@ -190,40 +229,64 @@ def _hier_encode(X, centroids, levels):
 
 
 class SphericalKMeans(BaseEstimator):
-    """Assumes normalised input (zero mean and unit variance or magnitude)"""
+    """Spherical KMeans clustering.
+
+    Parameters:
+
+        n_clusters : int, default: 10
+            Number of centroids to learn.
+
+        iterations : int, default: 10
+            Number of iterations to use in learning.
+    """
     def __init__(self, n_clusters=10, iterations=10):
         self.n_clusters = n_clusters
         self.iterations = iterations
 
     def fit(self, X, y=None):
-        """ """
+        """Cluster the given data."""
         self.centroids = _spherical_kmeans(X, self.n_clusters, self.iterations)
 
     def transform(self, X, y=None):
-        """ """
+        """Return the distance from the input data to each cluster centroid."""
         return np.dot(X, self.centroids.T)
 
     def predict(self, X, y=None):
-        """ """
+        """Return the nearest cluster centroid to each input data point."""
         similarities = np.dot(X, self.centroids.T)
         return similarities.argmax(axis=1)
 
 
 class HierSKMeans(BaseEstimator):
+    """Hierarchical spherical kmeans clustering. 
+
+    Parameters:
+
+        n_clusters : int, default: 10
+            Number of centroids to learn.
+
+        iterations : int, default: 10
+            Number of iterations to use in learning.
+
+        levels : int, default: 2
+            Number of hierarchical levels to use in the encoding.
+    """
     def __init__(self, n_clusters=10, iterations=10, levels=2):
         self.n_clusters = n_clusters
         self.iterations = iterations
         self.levels = levels
 
     def fit(self, X, y=None):
-        """ """
+        """Learn the hierarchical cluster centroids."""
         self.centroids = _hier_kmeans(X, self.n_clusters, self.iterations, self.levels)
 
     def transform(self, X, y=None):
+        """Return the leaf level codes for each data point."""
         encoding_tree = _hier_encode(X, self.centroids, levels=self.levels)
         return encoding_tree
 
     def predict(self, X, y=None):
+        """Return the index of the nearest centroid for each data point."""
         encoding_tree = _hier_encode(X, self.centroids, levels=self.levels)
         for i in range(1, self.levels):
             encoding_tree[:, -(i+1)] *= self.n_clusters**i  
