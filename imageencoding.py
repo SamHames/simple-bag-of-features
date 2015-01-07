@@ -9,7 +9,7 @@ from __future__ import division, print_function
 import numpy as np
 from sklearn.feature_extraction.image import extract_patches_2d
 from sklearn.base import BaseEstimator
-from featurelearning import Whiten, SphericalKMeans, normalise_inplace, HierSKMeans
+from .featurelearning import Whiten, SphericalKMeans, normalise_inplace, HierSKMeans
 
 
 def collect_normalised_patches(images, n_images, pixels=7,
