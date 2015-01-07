@@ -111,6 +111,19 @@ def make_histogram(encoding, words):
     return np.histogram(encoding, bins=words, range=(0, words))[0]
 
 
+def _combine_proj_whiten(hier_centroids, whiten_matrix, levels):
+    """Premultiplies the dictionary by the whitening matrix.
+    """
+    if levels == 1:
+        return np.dot(whiten_matrix, hier_centroids.T).T
+    else:
+        for i in range(hier_centroids[0].shape[0]):
+            head = np.dot(whiten_matrix, hier_centroids[0].T).T
+            rest = [_combine_proj_whiten(centroids, whiten_matrix, 
+                                         levels-1) for centroids in hier_centroids[1:]]
+            return [head] + rest
+
+
 class BagOfFeaturesEncoder(BaseEstimator):
     """Transformer for a bag of features encoding of an image.
 
@@ -195,15 +208,20 @@ class BagOfFeaturesEncoder(BaseEstimator):
         self.whiten.fit(patches)
         self.whiten.transform(patches, inplace=True)
         self.cluster.fit(patches)
+        # Optimise: multiply the whitening transform into the dictionary.
+        self.cluster.centroids = _combine_proj_whiten(self.cluster.centroids,
+                                                      self.whiten.whiten,
+                                                      self.levels)
 
     def preprocess(self, image):
         """Return normalised and whitened patches extracted from the given image.
         """
+        image = np.asfarray(image)
         patches = extract_patches_2d(image,
                                          patch_size=(self.pixels, self.pixels))
         patches = patches.reshape((-1, self.pixels**2))
         normalise_inplace(patches, self.whiten_reg)
-        return self.whiten.transform(patches)
+        return patches
 
     def predict(self, images, y=None, pool=False):
         """Compute the histogram of visual word counts, over all input images.

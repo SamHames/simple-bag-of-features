@@ -1,9 +1,6 @@
 import numpy as np
 from BOF import BagOfFeaturesEncoder
-from BOF.imageencoding import collect_normalised_patches, Augment
-
-np.random.seed(10)
-
+from BOF.imageencoding import collect_normalised_patches, Augment, _combine_proj_whiten
 
 class testPatchExtractor():
     def setUp(self):
@@ -93,3 +90,18 @@ class testAugment():
         augment = Augment('both')
         augmented = augment(self.image)
         assert len(augmented) == 12
+
+
+def test_combine():
+    images = (np.random.randint(0, high=255, size=(50,50)) for i in range(10))
+    bof = BagOfFeaturesEncoder(levels=2)
+    bof.fit(images, 10)
+    whiten = bof.whiten.whiten
+    centroids = bof.cluster.centroids
+    new_centroids = _combine_proj_whiten(centroids, whiten, 2)
+    assert len(new_centroids) == 11
+    top = np.dot(whiten, centroids[0].T).T
+    end = np.dot(whiten, centroids[-1][-1].T).T
+    assert np.allclose(top, new_centroids[0])
+    assert np.allclose(end, new_centroids[-1][-1])
+
