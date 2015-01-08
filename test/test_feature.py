@@ -52,6 +52,13 @@ def energy_concentrated(X):
     variances = np.abs(np.diag(X)).sum()
     upper_tri = np.abs(np.triu(X, k=1)).sum()
     return variances > upper_tri
+    
+    
+def test_kmeans_init():
+    test_array = np.zeros((9,10))
+    centroids = _init_random_selection(test_array, 10)
+    assert centroids.shape == (10, 10)
+    assert np.all(centroids == 0)
 
 
 class testWhiten():

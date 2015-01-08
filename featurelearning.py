@@ -164,14 +164,13 @@ class Whiten(BaseEstimator):
 
 def _iterate_spherical(X, centroids, sort_mag=False):
     """Performs a single iteration of spherical kmeans."""
-    similarities = np.dot(X, centroids.T)
-    cluster_assignments = np.argmax(similarities, axis=1)
+    cluster_assignments = np.dot(X, centroids.T).argmax(axis=1)
     new_centroids = np.zeros_like(centroids)
     
     for i in range(centroids.shape[0]):
         this_cluster = cluster_assignments == i
         if np.sum(this_cluster) == 0: # Reassign zombie cluster
-            new_centroids[i,:] = _init_random_selection(X)
+            new_centroids[i,:] = _init_random_selection(X, 1)
         else:
             new_centroids[i,:] = np.sum(X[this_cluster, :], axis=0)
 
@@ -185,8 +184,13 @@ def _iterate_spherical(X, centroids, sort_mag=False):
     return new_centroids
 
 
-def _init_random_selection(X, n_clusters=None):
-    """Choose randomly from input patches as initial centroids."""
+def _init_random_selection(X, n_clusters):
+    """Choose randomly from input patches as initial centroids.
+    
+    If there are no input patches, return a set of zero centroids. This 
+    excludes this group from further consideration."""
+    if X.shape[0] < n_clusters:
+        return np.zeros((n_clusters, X.shape[1]))
     indices = np.random.randint(X.shape[0], size=n_clusters)
     centroids = X[indices, :].copy()
     return centroids
@@ -194,7 +198,7 @@ def _init_random_selection(X, n_clusters=None):
 
 def _spherical_kmeans(X, n_clusters, iterations):
     """Return centroids after multiple iterations of spherical kmeans."""
-    centroids = _init_random_selection(X, n_clusters=n_clusters)
+    centroids = _init_random_selection(X, n_clusters)
     for i in range(iterations):
         centroids = _iterate_spherical(X, centroids, sort_mag=True)
     return centroids
