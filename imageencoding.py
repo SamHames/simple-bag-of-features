@@ -91,7 +91,7 @@ class Augment():
         if self.approach == 'rotate':
             return [np.rot90(images[i], k=-i) for i in range(0,4)]
         elif self.approach == 'reflect':
-            return [images[0], np.fliplr(image[1]), np.flipud(image[2])]
+            return [images[0], np.fliplr(images[1]), np.flipud(images[2])]
         elif self.approach == 'both':
             base = [np.rot90(images[i], k=-i) for i in range(0,4)]
             left = [np.fliplr(im) for im in images[4:8]]
@@ -258,9 +258,6 @@ class BagOfFeaturesEncoder(BaseEstimator):
         Sum the result over all of the augmented versions of the image.
 
         """
-        predicted = []
-        i = 0
-        total_words = self.n_words**self.levels
         augmented = self.augment_(image)
         encoded = [self.transform(im, reshape=True) for im in augmented]
         encoded = sum(self.augment_.inverse_transform(encoded))
