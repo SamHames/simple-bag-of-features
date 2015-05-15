@@ -1,0 +1,6 @@
+This module implements a hierarchical spherical kmeans dictionary learning and image encoding algorithm.
+
+It can be installed by running in the root directory:
+    python setup.py install
+
+This module needs to be installed for the segmentation and inflammation projects.
